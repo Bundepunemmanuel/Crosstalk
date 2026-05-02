@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { convertThread } from './groq'
 import { checkDemoLimit, recordDemoUsage } from './supabase'
 import OutputTabs from './OutputTabs'
@@ -22,6 +22,23 @@ The thing nobody says: the hardest part isn't building. It's staying consistent 
 
 Most people quit in month 3. That's why month 14 feels so quiet.`
 
+// Use localStorage as fallback when IP check fails (X in-app browser)
+const getDemoKey = () => 'crosstalk_demo_used'
+
+const hasDemoBeenUsed = () => {
+  try {
+    return localStorage.getItem(getDemoKey()) === 'true'
+  } catch (_) {
+    return false
+  }
+}
+
+const markDemoAsUsed = () => {
+  try {
+    localStorage.setItem(getDemoKey(), 'true')
+  } catch (_) {}
+}
+
 export default function DemoBox({ user }) {
   const [text, setText] = useState(SAMPLE_THREAD)
   const [output, setOutput] = useState(null)
@@ -29,41 +46,60 @@ export default function DemoBox({ user }) {
   const [error, setError] = useState('')
   const [convertCount, setConvertCount] = useState(0)
   const [showWall, setShowWall] = useState(false)
+  const hasConverted = useRef(false)
 
   const handleConvert = async () => {
     if (!text.trim()) { setError('Paste your X thread first.'); return }
     setError('')
 
-    // Show wall on 2nd+ attempt for non-logged-in users
-    if (!user && convertCount >= 1) {
+    // For logged in users — always allow
+    if (user) {
+      setLoading(true)
+      try {
+        const result = await convertThread(text)
+        setOutput(result)
+        setConvertCount(c => c + 1)
+      } catch (err) {
+        setError('Conversion failed. Please try again.')
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // For guests — check both localStorage AND convert count
+    // Show wall on 2nd attempt (after they've seen the result once)
+    if (hasConverted.current || hasDemoBeenUsed()) {
       setShowWall(true)
       return
     }
 
     setLoading(true)
-
     try {
-      // Check IP limit for non-logged-in users
-      if (!user) {
-        let ip = 'unknown'
-        try {
-          const ipRes = await fetch('https://api.ipify.org?format=json')
-          const ipData = await ipRes.json()
-          ip = ipData.ip
-        } catch (_) {}
+      // Also check IP (for users who cleared localStorage)
+      let ip = 'unknown'
+      try {
+        const ipRes = await fetch('https://api.ipify.org?format=json')
+        const ipData = await ipRes.json()
+        ip = ipData.ip
+      } catch (_) {}
 
-        const allowed = await checkDemoLimit(ip)
-        if (!allowed) {
-          setShowWall(true)
-          setLoading(false)
-          return
-        }
-        await recordDemoUsage(ip)
+      const allowed = await checkDemoLimit(ip)
+      if (!allowed) {
+        setShowWall(true)
+        setLoading(false)
+        return
       }
 
       const result = await convertThread(text)
       setOutput(result)
-      setConvertCount(c => c + 1)
+
+      // Mark as used in both IP table and localStorage
+      await recordDemoUsage(ip)
+      markDemoAsUsed()
+      hasConverted.current = true
+      setConvertCount(1)
+
     } catch (err) {
       setError('Conversion failed. Please try again.')
       console.error(err)
@@ -121,14 +157,14 @@ export default function DemoBox({ user }) {
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
       </div>
 
-      {/* Output — show cleanly first, wall on next attempt */}
+      {/* Output — show cleanly, wall on next attempt */}
       {output && !showWall && (
         <div className="animate-slide-up">
           <OutputTabs output={output} />
         </div>
       )}
 
-      {/* Signup wall — shown when they try to convert again */}
+      {/* Signup wall */}
       {showWall && (
         <div className="card border-violet-500/20 flex flex-col items-center justify-center py-12 text-center animate-slide-up">
           <div className="w-12 h-12 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center mb-4">
@@ -152,4 +188,4 @@ export default function DemoBox({ user }) {
       )}
     </div>
   )
-}
+        }
