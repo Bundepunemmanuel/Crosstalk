@@ -5,34 +5,37 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// Record page visit
+// ─── Page visits ───────────────────────────────────────────
 export const recordPageVisit = async () => {
   try {
     await supabase.from('page_visits').insert({
       user_agent: navigator.userAgent,
       visited_at: new Date().toISOString(),
     })
-  } catch (e) {
-    // Silent fail
+  } catch (_) {}
+}
+
+// ─── Demo limiting ─────────────────────────────────────────
+export const checkDemoLimit = async (ip) => {
+  try {
+    const { data } = await supabase
+      .from('demo_conversions')
+      .select('id')
+      .eq('ip_address', ip)
+      .limit(1)
+    return !(data && data.length > 0)
+  } catch (_) {
+    return true // allow on error
   }
 }
 
-// Check if IP has used demo
-export const checkDemoLimit = async (ip) => {
-  const { data } = await supabase
-    .from('demo_conversions')
-    .select('id')
-    .eq('ip_address', ip)
-    .limit(1)
-  return !(data && data.length > 0) // true = allowed
-}
-
-// Record demo usage
 export const recordDemoUsage = async (ip) => {
-  await supabase.from('demo_conversions').insert({ ip_address: ip })
+  try {
+    await supabase.from('demo_conversions').insert({ ip_address: ip })
+  } catch (_) {}
 }
 
-// Get user profile
+// ─── Profile ───────────────────────────────────────────────
 export const getProfile = async (userId) => {
   const { data, error } = await supabase
     .from('profiles')
@@ -42,7 +45,26 @@ export const getProfile = async (userId) => {
   return { data, error }
 }
 
-// Save conversion
+export const updateProfile = async (userId, updates) => {
+  const { error } = await supabase.from('profiles').update(updates).eq('id', userId)
+  return { error }
+}
+
+// ─── Subscription status check ─────────────────────────────
+// Returns: 'active' | 'expired' | 'free'
+export const getSubscriptionStatus = (profile) => {
+  if (!profile) return 'free'
+  if (profile.is_subscribed) {
+    if (profile.subscription_expires) {
+      const expired = new Date(profile.subscription_expires) < new Date()
+      if (expired) return 'expired'
+    }
+    return 'active'
+  }
+  return 'free'
+}
+
+// ─── Conversions ───────────────────────────────────────────
 export const saveConversion = async (userId, conversionData) => {
   const { data, error } = await supabase
     .from('conversions')
@@ -52,7 +74,6 @@ export const saveConversion = async (userId, conversionData) => {
   return { data, error }
 }
 
-// Get user conversions
 export const getUserConversions = async (userId) => {
   const { data, error } = await supabase
     .from('conversions')
@@ -62,26 +83,29 @@ export const getUserConversions = async (userId) => {
   return { data: data || [], error }
 }
 
-// Get page visit stats for admin
+// ─── Admin stats ───────────────────────────────────────────
 export const getPageVisitStats = async () => {
-  const now = new Date()
-  const todayStart = new Date(now.setHours(0, 0, 0, 0)).toISOString()
-  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  try {
+    const now = new Date()
+    const todayStart = new Date(now.setHours(0, 0, 0, 0)).toISOString()
+    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-  const [total, today, week] = await Promise.all([
-    supabase.from('page_visits').select('id', { count: 'exact', head: true }),
-    supabase.from('page_visits').select('id', { count: 'exact', head: true }).gte('visited_at', todayStart),
-    supabase.from('page_visits').select('id', { count: 'exact', head: true }).gte('visited_at', weekStart),
-  ])
+    const [total, today, week] = await Promise.all([
+      supabase.from('page_visits').select('id', { count: 'exact', head: true }),
+      supabase.from('page_visits').select('id', { count: 'exact', head: true }).gte('visited_at', todayStart),
+      supabase.from('page_visits').select('id', { count: 'exact', head: true }).gte('visited_at', weekStart),
+    ])
 
-  return {
-    total: total.count || 0,
-    today: today.count || 0,
-    week: week.count || 0,
+    return {
+      total: total.count || 0,
+      today: today.count || 0,
+      week: week.count || 0,
+    }
+  } catch (_) {
+    return { total: 0, today: 0, week: 0 }
   }
 }
 
-// Set user subscribed status
 export const setUserSubscribed = async (userId, subscribed) => {
   const { error } = await supabase.from('profiles').update({
     is_subscribed: subscribed,

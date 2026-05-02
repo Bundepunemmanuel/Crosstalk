@@ -27,37 +27,46 @@ export default function DemoBox({ user }) {
   const [output, setOutput] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [demoUsed, setDemoUsed] = useState(false)
+  const [convertCount, setConvertCount] = useState(0)
   const [showWall, setShowWall] = useState(false)
 
   const handleConvert = async () => {
     if (!text.trim()) { setError('Paste your X thread first.'); return }
     setError('')
+
+    // Show wall on 2nd+ attempt for non-logged-in users
+    if (!user && convertCount >= 1) {
+      setShowWall(true)
+      return
+    }
+
     setLoading(true)
 
     try {
-      // Check demo limit by IP
-      const ipRes = await fetch('https://api.ipify.org?format=json').catch(() => null)
-      const ip = ipRes ? (await ipRes.json()).ip : 'unknown'
-
+      // Check IP limit for non-logged-in users
       if (!user) {
+        let ip = 'unknown'
+        try {
+          const ipRes = await fetch('https://api.ipify.org?format=json')
+          const ipData = await ipRes.json()
+          ip = ipData.ip
+        } catch (_) {}
+
         const allowed = await checkDemoLimit(ip)
         if (!allowed) {
           setShowWall(true)
           setLoading(false)
           return
         }
+        await recordDemoUsage(ip)
       }
 
       const result = await convertThread(text)
       setOutput(result)
-
-      if (!user) {
-        await recordDemoUsage(ip)
-        setDemoUsed(true)
-      }
+      setConvertCount(c => c + 1)
     } catch (err) {
       setError('Conversion failed. Please try again.')
+      console.error(err)
     } finally {
       setLoading(false)
     }
@@ -78,8 +87,8 @@ export default function DemoBox({ user }) {
         </div>
         <textarea
           value={text}
-          onChange={e => setText(e.target.value)}
-          placeholder="Paste your X thread here... (tip: copy all tweets in the thread)"
+          onChange={e => { setText(e.target.value); setError('') }}
+          placeholder="Paste your X thread here..."
           rows={8}
           className="input-field resize-none text-sm leading-relaxed"
           maxLength={5000}
@@ -112,51 +121,32 @@ export default function DemoBox({ user }) {
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
       </div>
 
-      {/* Output */}
-      {output && (
-        <div className="relative animate-slide-up">
-          <OutputTabs output={output} blurred={showWall} />
-
-          {/* Signup wall overlay */}
-          {(showWall || demoUsed) && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-dark-900/90 backdrop-blur-sm border border-violet-500/20 p-8 text-center">
-              <div className="w-12 h-12 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center mb-4">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path d="M10 1l2.39 4.84L18 6.91l-4 3.9.94 5.5L10 13.77l-4.94 2.54L6 10.81 2 6.91l5.61-.67L10 1z" fill="#8b5cf6"/>
-                </svg>
-              </div>
-              <h3 className="font-display font-bold text-white text-xl mb-2">Like what you see?</h3>
-              <p className="text-white/50 text-sm mb-6 max-w-xs">
-                Get unlimited conversions for $12/month. No limits, no credits counter.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Link to="/signup" className="btn-primary text-sm">
-                  Get Started — $12/mo
-                </Link>
-                <Link to="/login" className="btn-ghost text-sm">
-                  I have an account
-                </Link>
-              </div>
-            </div>
-          )}
+      {/* Output — show cleanly first, wall on next attempt */}
+      {output && !showWall && (
+        <div className="animate-slide-up">
+          <OutputTabs output={output} />
         </div>
       )}
 
-      {/* Show wall even before output if limit hit */}
-      {showWall && !output && (
-        <div className="card glow-border flex flex-col items-center justify-center py-12 text-center animate-slide-up">
+      {/* Signup wall — shown when they try to convert again */}
+      {showWall && (
+        <div className="card border-violet-500/20 flex flex-col items-center justify-center py-12 text-center animate-slide-up">
           <div className="w-12 h-12 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center mb-4">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <path d="M10 1l2.39 4.84L18 6.91l-4 3.9.94 5.5L10 13.77l-4.94 2.54L6 10.81 2 6.91l5.61-.67L10 1z" fill="#8b5cf6"/>
             </svg>
           </div>
-          <h3 className="font-display font-bold text-white text-xl mb-2">You've used your free conversion</h3>
+          <h3 className="font-display font-bold text-white text-xl mb-2">Like what you see?</h3>
           <p className="text-white/50 text-sm mb-6 max-w-xs">
-            Unlock unlimited conversions for $12/month.
+            Get unlimited conversions for $12/month. No limits, no credits counter.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <Link to="/signup" className="btn-primary text-sm">Get Started — $12/mo</Link>
-            <Link to="/login" className="btn-ghost text-sm">I have an account</Link>
+          <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
+            <Link to="/signup" className="btn-primary text-sm w-full justify-center">
+              Get Started — $12/mo
+            </Link>
+            <Link to="/login" className="btn-ghost text-sm w-full justify-center">
+              I have an account
+            </Link>
           </div>
         </div>
       )}
