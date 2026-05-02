@@ -6,7 +6,7 @@ Transform the X thread into a LinkedIn post AND a Reddit post.
 
 TONE DETECTION:
 - Motivational/inspiring → quiet confidence and forward momentum
-- Technical/educational → clarity and genuine insight  
+- Technical/educational → clarity and genuine insight
 - Failure/struggle → vulnerability and raw honesty
 - Win/milestone → humble pride, not arrogance
 - Funny/casual → preserve the humor
@@ -36,14 +36,14 @@ REDDIT RULES:
 - No hashtags, no emojis ever
 - End with a real discussion question
 
-YOU MUST RESPOND IN EXACTLY THIS FORMAT — no intro text, no explanation, just this:
+YOU MUST RESPOND IN EXACTLY THIS FORMAT WITH ALL 6 FIELDS — no intro, no explanation:
 
-LINKEDIN_OUTPUT: [full linkedin post]
+LINKEDIN_OUTPUT: [full linkedin post here]
 REDDIT_SUBREDDIT_PRIMARY: r/[name]
 REDDIT_SUBREDDIT_ALT1: r/[name]
 REDDIT_SUBREDDIT_ALT2: r/[name]
-REDDIT_TITLE: [title]
-REDDIT_BODY: [full body]`
+REDDIT_TITLE: [title here]
+REDDIT_BODY: [full reddit post body here]`
 
 export const convertThread = async (threadText) => {
   if (!threadText?.trim()) throw new Error('Thread text is empty')
@@ -59,11 +59,11 @@ export const convertThread = async (threadText) => {
     },
     body: JSON.stringify({
       model: 'llama-3.1-8b-instant',
-      max_tokens: 2000,
-      temperature: 0.75,
+      max_tokens: 2500,
+      temperature: 0.7,
       messages: [
         { role: 'system', content: MASTER_PROMPT },
-        { role: 'user', content: `Convert this X thread:\n\n${threadText}` }
+        { role: 'user', content: `Convert this X thread and return ALL 6 fields:\n\n${threadText}` }
       ]
     })
   })
@@ -77,13 +77,66 @@ export const convertThread = async (threadText) => {
   const raw = data.choices?.[0]?.message?.content
   if (!raw) throw new Error('Empty response from AI')
 
-  return parseOutput(raw)
+  const parsed = parseOutput(raw)
+
+  // If Reddit body is empty, retry once with a stricter prompt
+  if (!parsed.redditBody || parsed.redditBody.length < 20) {
+    return await retryForReddit(threadText, apiKey, parsed)
+  }
+
+  return parsed
+}
+
+const retryForReddit = async (threadText, apiKey, existingParsed) => {
+  const retryResponse = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'llama-3.1-8b-instant',
+      max_tokens: 1500,
+      temperature: 0.7,
+      messages: [
+        {
+          role: 'user',
+          content: `Generate a Reddit post for this X thread. Return ONLY these 4 fields, nothing else:
+
+REDDIT_SUBREDDIT_PRIMARY: r/[best subreddit]
+REDDIT_SUBREDDIT_ALT1: r/[alternative]
+REDDIT_SUBREDDIT_ALT2: r/[another alternative]
+REDDIT_TITLE: [compelling title]
+REDDIT_BODY: [full genuine community post, no hashtags, no emojis, end with a question]
+
+X Thread:
+${threadText}`
+        }
+      ]
+    })
+  })
+
+  if (!retryResponse.ok) return existingParsed
+
+  const retryData = await retryResponse.json()
+  const retryRaw = retryData.choices?.[0]?.message?.content || ''
+  const retryParsed = parseOutput(retryRaw)
+
+  return {
+    linkedin: existingParsed.linkedin,
+    redditSubredditPrimary: retryParsed.redditSubredditPrimary || 'r/SideProject',
+    redditSubredditAlt1: retryParsed.redditSubredditAlt1 || 'r/entrepreneur',
+    redditSubredditAlt2: retryParsed.redditSubredditAlt2 || 'r/indiehackers',
+    redditTitle: retryParsed.redditTitle || '',
+    redditBody: retryParsed.redditBody || '',
+  }
 }
 
 const parseOutput = (raw) => {
   const get = (key) => {
-    // Match key: then capture everything until next KEY: or end of string
-    const regex = new RegExp(`${key}:\\s*([\\s\\S]*?)(?=\\n(?:LINKEDIN_OUTPUT|REDDIT_SUBREDDIT_PRIMARY|REDDIT_SUBREDDIT_ALT1|REDDIT_SUBREDDIT_ALT2|REDDIT_TITLE|REDDIT_BODY):|$)`)
+    const regex = new RegExp(
+      `${key}:\\s*([\\s\\S]*?)(?=\\n(?:LINKEDIN_OUTPUT|REDDIT_SUBREDDIT_PRIMARY|REDDIT_SUBREDDIT_ALT1|REDDIT_SUBREDDIT_ALT2|REDDIT_TITLE|REDDIT_BODY):|$)`
+    )
     const match = raw.match(regex)
     return match ? match[1].trim() : ''
   }
