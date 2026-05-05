@@ -19,7 +19,7 @@ const CopyButton = ({ text, label = 'Copy' }) => {
 }
 
 export default function OutputTabs({ output }) {
-  const [activeTab, setActiveTab] = useState('linkedin')
+  const [activeTab, setActiveTab] = useState('reddit')
 
   if (!output) return null
 
