@@ -1,3 +1,4 @@
+import { supabase } from './supabase'
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Navbar from './Navbar'
@@ -57,7 +58,12 @@ export default function Dashboard({ user }) {
       setSaved(true)
 
       if (subStatus !== 'active' && profile?.credits > 0) {
-        setProfile(p => ({ ...p, credits: p.credits - 1 }))
+  const newCredits = profile.credits - 1
+  setProfile(p => ({ ...p, credits: newCredits }))
+  await supabase
+    .from('profiles')
+    .update({ credits: newCredits })
+    .eq('id', user.id)
       }
     } catch (err) {
       setError('Conversion failed. Please try again.')
