@@ -26,6 +26,7 @@ LINKEDIN RULES:
 - Exactly 5 relevant hashtags at end
 - End with an engagement question
 - 900-1200 characters sweet spot
+- NEVER include Reddit format tags in LinkedIn output
 
 REDDIT RULES:
 - Primary subreddit: best fit
@@ -36,14 +37,23 @@ REDDIT RULES:
 - No hashtags, no emojis ever
 - End with a real discussion question
 
-YOU MUST RESPOND IN EXACTLY THIS FORMAT WITH ALL 6 FIELDS — no intro, no explanation:
+CRITICAL OUTPUT RULES:
+- No asterisks or ** markdown anywhere
+- No bold formatting anywhere
+- No placeholder text like [name] or [title here]
+- No extra text before or after the 6 fields
+- Every field must have real content
+- Reddit fields must NEVER appear inside LinkedIn output
+- LinkedIn output must ONLY contain the LinkedIn post
 
-LINKEDIN_OUTPUT: [full linkedin post here]
-REDDIT_SUBREDDIT_PRIMARY: r/[name]
-REDDIT_SUBREDDIT_ALT1: r/[name]
-REDDIT_SUBREDDIT_ALT2: r/[name]
-REDDIT_TITLE: [title here]
-REDDIT_BODY: [full reddit post body here]`
+YOU MUST RESPOND IN EXACTLY THIS FORMAT WITH ALL 6 FIELDS:
+
+LINKEDIN_OUTPUT: [write the actual full linkedin post here with no reddit tags]
+REDDIT_SUBREDDIT_PRIMARY: r/[actual subreddit name]
+REDDIT_SUBREDDIT_ALT1: r/[actual subreddit name]
+REDDIT_SUBREDDIT_ALT2: r/[actual subreddit name]
+REDDIT_TITLE: [write the actual title]
+REDDIT_BODY: [write the actual full reddit post body]`
 
 export const convertThread = async (threadText) => {
   if (!threadText?.trim()) throw new Error('Thread text is empty')
@@ -63,7 +73,7 @@ export const convertThread = async (threadText) => {
       temperature: 0.7,
       messages: [
         { role: 'system', content: MASTER_PROMPT },
-        { role: 'user', content: `Convert this X thread and return ALL 6 fields:\n\n${threadText}` }
+        { role: 'user', content: `Convert this X thread and return ALL 6 fields with real content, no placeholders, no markdown:\n\n${threadText}` }
       ]
     })
   })
@@ -79,8 +89,8 @@ export const convertThread = async (threadText) => {
 
   const parsed = parseOutput(raw)
 
-  // If Reddit body is empty, retry once with a stricter prompt
-  if (!parsed.redditBody || parsed.redditBody.length < 20) {
+  // If Reddit body is empty or still a placeholder, retry once
+  if (!parsed.redditBody || parsed.redditBody.length < 20 || parsed.redditBody.includes('[full reddit')) {
     return await retryForReddit(threadText, apiKey, parsed)
   }
 
@@ -88,49 +98,58 @@ export const convertThread = async (threadText) => {
 }
 
 const retryForReddit = async (threadText, apiKey, existingParsed) => {
-  const retryResponse = await fetch(GROQ_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'llama-3.1-8b-instant',
-      max_tokens: 1500,
-      temperature: 0.7,
-      messages: [
-        {
-          role: 'user',
-          content: `Generate a Reddit post for this X thread. Return ONLY these 4 fields, nothing else:
+  try {
+    const retryResponse = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        max_tokens: 1500,
+        temperature: 0.7,
+        messages: [
+          {
+            role: 'user',
+            content: `Write a Reddit post for this content. Return ONLY these 5 fields with real content, no placeholders, no markdown asterisks:
 
 REDDIT_SUBREDDIT_PRIMARY: r/[best subreddit]
-REDDIT_SUBREDDIT_ALT1: r/[alternative]
-REDDIT_SUBREDDIT_ALT2: r/[another alternative]
-REDDIT_TITLE: [compelling title]
-REDDIT_BODY: [full genuine community post, no hashtags, no emojis, end with a question]
+REDDIT_SUBREDDIT_ALT1: r/[alternative subreddit]
+REDDIT_SUBREDDIT_ALT2: r/[another subreddit]
+REDDIT_TITLE: [compelling honest title]
+REDDIT_BODY: [full genuine community post, conversational tone, end with question]
 
-X Thread:
+Content to convert:
 ${threadText}`
-        }
-      ]
+          }
+        ]
+      })
     })
-  })
 
-  if (!retryResponse.ok) return existingParsed
+    if (!retryResponse.ok) return existingParsed
 
-  const retryData = await retryResponse.json()
-  const retryRaw = retryData.choices?.[0]?.message?.content || ''
-  const retryParsed = parseOutput(retryRaw)
+    const retryData = await retryResponse.json()
+    const retryRaw = retryData.choices?.[0]?.message?.content || ''
+    const retryParsed = parseOutput(retryRaw)
 
-  return {
-    linkedin: existingParsed.linkedin,
-    redditSubredditPrimary: retryParsed.redditSubredditPrimary || 'r/SideProject',
-    redditSubredditAlt1: retryParsed.redditSubredditAlt1 || 'r/entrepreneur',
-    redditSubredditAlt2: retryParsed.redditSubredditAlt2 || 'r/indiehackers',
-    redditTitle: retryParsed.redditTitle || '',
-    redditBody: retryParsed.redditBody || '',
+    return {
+      linkedin: existingParsed.linkedin,
+      redditSubredditPrimary: retryParsed.redditSubredditPrimary || 'r/SideProject',
+      redditSubredditAlt1: retryParsed.redditSubredditAlt1 || 'r/entrepreneur',
+      redditSubredditAlt2: retryParsed.redditSubredditAlt2 || 'r/indiehackers',
+      redditTitle: retryParsed.redditTitle || '',
+      redditBody: retryParsed.redditBody || '',
+    }
+  } catch (_) {
+    return existingParsed
   }
 }
+
+const clean = (str) => str
+  .replace(/\*\*/g, '')
+  .replace(/\*/g, '')
+  .trim()
 
 const parseOutput = (raw) => {
   const get = (key) => {
@@ -141,12 +160,22 @@ const parseOutput = (raw) => {
     return match ? match[1].trim() : ''
   }
 
+  // Clean linkedin output — remove any reddit tags that leaked in
+  const linkedinRaw = get('LINKEDIN_OUTPUT')
+  const linkedinClean = linkedinRaw
+    .replace(/REDDIT_SUBREDDIT_PRIMARY:.*$/gm, '')
+    .replace(/REDDIT_SUBREDDIT_ALT1:.*$/gm, '')
+    .replace(/REDDIT_SUBREDDIT_ALT2:.*$/gm, '')
+    .replace(/REDDIT_TITLE:.*$/gm, '')
+    .replace(/REDDIT_BODY:[\s\S]*/gm, '')
+    .trim()
+
   return {
-    linkedin: get('LINKEDIN_OUTPUT'),
-    redditSubredditPrimary: get('REDDIT_SUBREDDIT_PRIMARY'),
-    redditSubredditAlt1: get('REDDIT_SUBREDDIT_ALT1'),
-    redditSubredditAlt2: get('REDDIT_SUBREDDIT_ALT2'),
-    redditTitle: get('REDDIT_TITLE'),
-    redditBody: get('REDDIT_BODY'),
+    linkedin: clean(linkedinClean),
+    redditSubredditPrimary: clean(get('REDDIT_SUBREDDIT_PRIMARY')),
+    redditSubredditAlt1: clean(get('REDDIT_SUBREDDIT_ALT1')),
+    redditSubredditAlt2: clean(get('REDDIT_SUBREDDIT_ALT2')),
+    redditTitle: clean(get('REDDIT_TITLE')),
+    redditBody: clean(get('REDDIT_BODY')),
   }
-}
+    }
